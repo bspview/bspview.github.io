@@ -1,2 +1,0 @@
-# bspview.github.io
-BspView
