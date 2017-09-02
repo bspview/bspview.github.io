@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+    <title>Half-Life Map Viewer</title>
+	
+	<!-- 
+		Author rein4ce [ https://github.com/rein4ce/hlbsp ]
+		Modification by Jerry
+	-->
+    
+	<style>
+		* {
+			box-sizing: border-box;
+			margin: 0;
+			padding: 0;
+		}	
+		.load-app-process-cnt {
+			background: #111;
+			position: fixed;
+			top: 0px;
+			left: 0px;
+			z-index: 9999;
+			width: 100%;
+			height: 100%;
+			padding: 10px;
+			overflow-y: auto;
+		}
+		.load-app-process-cnt * {
+			color: white;
+			font: 13px Arial;
+			font-weight: bold;
+			text-shadow: 0px 0px 5px #FFF;
+		}
+		.load-app-process-cnt > div {
+			margin-top: 10px;
+		}
+		.load-app-progress-inside {
+			width: 0%;
+			height: 1px;
+			background: white;
+		}
+		.load-state-process {
+			color: #FF0;
+		}
+		.load-state-error {
+			color: #F00;
+		}
+	</style>
+
+</head>
+<body>
+
+<div class="load-app-process-cnt" ></div>
+
+<script>
+
+window.addEventListener('load', function() {
+	var GB_THIS_INNER_HTML = document.documentElement.outerHTML;
+	
+
+
+	function fetchSimplie(params) {
+		var xhr = new XMLHttpRequest();
+		xhr.onload = function() {
+			if ( this.status == 200 ) { params.done&&params.done(this.response); return; };
+			params.fail&&params.fail(this);
+		}
+		xhr.onerror = params.fail;
+		xhr.onprogress = function(event) {
+			params.progress&&params.progress(event.loaded, event.total);
+		}
+
+		xhr.open(params.method||"GET", params.url, params.async || true, params.user, params.password);
+		xhr.timeout = (params.timeout || 60) * 1e3;
+		xhr.responseType = params.responseType || "text";
+		xhr.send(params.body || null);
+	}
+
+	function ProgressBar(filename) {
+		this.elem = null;
+		this.init(filename);
+	}
+	ProgressBar.prototype.init = function(filename) {
+		var div = document.createElement('div');
+		div.innerHTML = '<span class="load-app-title" >Load <span class="load-filename" ></span></span><br/> <span>State:&nbsp;&nbsp;</span><span class="load-state" >wait…</span><br/> <span class="load-app-progress-title" ></span> <hr class="load-app-progress-inside" />'
+		document.querySelector('.load-app-process-cnt').appendChild(div);
+		div.querySelector('.load-filename').textContent = filename;//.replace(/\.[^\.]*$/, '');
+		this.elem = div;
+	}
+	ProgressBar.prototype.remove = function() {
+		this.elem&&this.elem.remove();
+		this.elem = null;
+	}
+	ProgressBar.prototype.setProgress = function(current, total) {
+		this.elem.querySelector('.load-app-progress-title').innerHTML = current + '&nbsp;/&nbsp;' + total;
+		if ( total != 0 ) {
+			this.elem.querySelector('.load-app-progress-inside').style.width = (current/total*1e2).toFixed(2)+'%';
+		}
+	}
+	ProgressBar.prototype.setState = function(state, color) { if ( !this.elem ){return;}
+		this.elem.querySelector('.load-state').textContent = state;
+		this.elem.querySelector('.load-state').style.color = color;
+	}
+
+	
+
+	function fetchJs(config) {
+
+		var prgBar = new ProgressBar(config.url);
+	
+		if ( location && location.protocol && location.protocol.indexOf('http') === 0 ) {
+		
+			fetchSimplie({
+				url:      config.url,
+				timeout:  config.url || 1e3,
+				done:     function(data) {
+					
+					try {
+						var srciptTrade = document.createElement('script');
+						srciptTrade.innerHTML = data;
+						document.body.appendChild(srciptTrade);
+					} catch(e) {};
+					
+					prgBar.setState('Successfully uploaded', '#0F0');
+		
+					config.done&&config.done(srciptTrade, config.url);
+					
+				},
+				progress: function(current, total) {
+					prgBar.setProgress(current, total);
+					
+					config.progress&&config.progress(current, total);
+				},
+				fail:     function(event) {
+					prgBar.setState('Error ['+( event.statusText || '' )+']', '#F00');
+					
+					config.fail&&config.fail();
+				},
+			});
+		
+		} else {
+			
+			var srciptTrade = document.createElement('script');
+			srciptTrade.src = config.url;
+			srciptTrade.onload = function() {
+				prgBar.setState('Successfully uploaded', '#0F0');
+				
+				config.done&&config.done(srciptTrade, config.url);
+			}
+			srciptTrade.onerror = function() {
+				prgBar.setState('Error [Not found]', '#F00');
+				
+				config.fail&&config.fail();
+			}
+			document.body.appendChild(srciptTrade);
+			
+		}
+		
+	}
+	function fetchJsList(list, config) {
+		var newList = [];
+		for(var i = 0; i < list.length; i++) {
+			if ( typeof(list[i]) === 'string' ) {
+				newList[i] = {url: list[i]};
+			} else {
+				newList[i] = list[i];
+			}
+		}
+		
+		var result = [];
+		var index = 0;
+		
+		function next() {
+			if ( index >= newList.length ) {
+				config.done&&config.done(result);
+				return;
+			}
+		
+			var orig = newList[index];
+			var obj = {};
+			obj.url = orig.url;
+			obj.done = function(data) {
+				result[index] = data;
+				index++;
+				next();
+			}
+			obj.fail = function() {
+				for(var i in result) {
+					result[i]&&result[i].remove();
+				}
+				config.fail&&config.fail();
+			}
+			fetchJs( obj );
+		}
+		next();
+		
+	}
+	
+	
+	//--------------
+	var GB_URL_CONFIG = 'app/config.js';
+
+	var global = {files: {__proto__: null}};
+	
+	var UPDATE_ID = 1;
+	var UPDATE_STRING = '?update=_'+UPDATE_ID+'_'+( (location&&location.hash.match(/__dev/)) ? (new Date()).getTime() : '0' );
+	
+	fetchJs({
+		url: GB_URL_CONFIG + UPDATE_STRING,
+		
+		done: function(scriptConfig, url) {
+
+			global.files[ GB_CONFIG.entryPointUrl ] = GB_THIS_INNER_HTML;
+			
+			global.files[ GB_CONFIG.configUrl ] = scriptConfig.src ? ( 'var GB_CONFIG = ' + JSON.stringify(GB_CONFIG) + ';' ) : scriptConfig.innerHTML;
+
+			scriptConfig.remove();
+			
+			fetchJs({
+				url: GB_CONFIG.appUrl + UPDATE_STRING,
+				
+				done: function(scriptApp) {
+					global.files[ GB_CONFIG.appUrl ] = 'var GLOBAL_TRADE_JSON = ' + JSON.stringify(GLOBAL_TRADE_JSON) + ';';
+					
+					GB_CONFIG.global = global;
+					
+					setTimeout(function() {
+						setApp();
+					
+						scriptApp.remove();
+						
+						document.querySelector('.load-app-process-cnt').style.display = 'none';
+					}, 200);
+				}
+			});
+		}
+	});
+	
+	function setApp() {
+		var json = GLOBAL_TRADE_JSON;
+		
+		
+		if ( !json ) {
+			return;
+		}
+		
+		
+		var style = document.createElement('style');
+		style.innerHTML = json.css;
+		document.body.appendChild(style);		
+		
+		var div = document.createElement('div');
+		div.innerHTML = json.html;
+		document.body.appendChild(div);
+		
+		var srcipt = document.createElement('script');
+		srcipt.innerHTML = json.js;
+		document.body.appendChild(srcipt);
+	}
+
+});
+
+</script>
+
+</body>
+</html>
